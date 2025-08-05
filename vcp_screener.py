@@ -1,19 +1,26 @@
 #!/usr/bin/env python
 # coding: utf-8
 
+# pylint: disable-msg=redefined-outer-name,missing-function-docstring,missing-module-docstring,line-too-long
+
 # In[ ]:
 
 
 # imports
+import os
+import sys
+from datetime import datetime
+from datetime import date as dt
+from datetime import time as tm
+import argparse
 import pandas as pd
 import numpy as np
 import yfinance as yf
-from datetime import date as dt
-import time
 from pyfinviz.screener import Screener
 import matplotlib.pyplot as plt
 from scipy.signal import argrelextrema
 
+from trending_stocks import get_stocks_with_15_percent_gain
 
 
 def clean_stock_data(df):
@@ -41,8 +48,9 @@ def trend_value(nums:list):
     denominator = (len(nums) * squared_index) - summed_index**2
     if denominator != 0:
         return numerator/denominator
-    else:
-        return 0
+
+    return 0
+
 
 # determine whether the ticker fulfills trend template
 def trend_template(df):
@@ -247,142 +255,222 @@ def rs_rating(ticker,rs_list):
     return rs
 
 
-# In[ ]:
+def check_market_closed():
+    """"""
+
+    currtime = tm(datetime.now().hour, datetime.now().minute)
+    opentime = tm(14,30)
+    closetime = tm(21,0)
+    # if still trading still print a warning and ask to continue
+    if currtime > opentime or currtime < closetime:
+        result = input("Still trading, results will be inconsistent, Continue ? [y/N] ")
+        if result.lower() != "y":
+            sys.exit()
 
 
-# Screen stocks from Finviz.com with filters
-filters = [Screener.MarketCapOption.SMALL_OVER_USD300MLN, Screener.AverageVolumeOption.OVER_100K,
-           Screener.PriceOption.OVER_USD2, Screener._200DaySimpleMovingAverageOption.SMA200_BELOW_SMA50,
-           Screener._200DaySimpleMovingAverageOption.PRICE_ABOVE_SMA200, Screener.IndexOption.S_AND_P_500]
-pages = [n for n in range(1, 16)]
+def get_screened_tickers():
+    """# Screen stocks from Finviz.com with filters"""
 
-stock_list = Screener(filter_options=filters, view_option=Screener.ViewOption.PERFORMANCE, pages=pages )
+    filters = [Screener.MarketCapOption.SMALL_OVER_USD300MLN,
+               Screener.AverageVolumeOption.OVER_100K,
+               Screener.PriceOption.OVER_USD2,
+               Screener._200DaySimpleMovingAverageOption.SMA200_ABOVE_SMA50,
+               Screener._200DaySimpleMovingAverageOption.PRICE_ABOVE_SMA200,
+               Screener.IndexOption.S_AND_P_500]
 
-#print(f"{stock_list.data_frames.get(1).columns}")
-#print(f"{stock_list.data_frames.get(6).index}")
+    #pages = list(range(1, 16))
 
-ticker_list = []
-for p in pages:
-    ticker_table = stock_list.data_frames.get(p)
-    ticker_list += ticker_table['Ticker'].to_list()
-print(f"{len(ticker_list)} Stock Tickers")
+    #stock_list = Screener(filter_options=filters, view_option=Screener.ViewOption.PERFORMANCE, pages=pages )
+
+    #print(f"{stock_list.data_frames.get(1).columns}")
+    #print(f"{stock_list.data_frames.get(6).index}")
+
+    ticker_list = []
+    for p in range(1,20):
+        try:
+            stock_list = Screener(filter_options=filters,
+                                  view_option=Screener.ViewOption.PERFORMANCE, pages=[p] )
+            ticker_table = stock_list.data_frames.get(p)
+            ticker_list += ticker_table['Ticker'].to_list()
+        except ValueError:
+            break
+
+    print(f"{len(ticker_list)} Stock Tickers")
+
+    with open("ticker_list.py", 'w') as tl:
+        tl.write(f"ticker_list = {ticker_list}\n")
+
+    return ticker_list
 
 
-# In[ ]:
+def get_saved_ticker_list():
+    """"""
+    try:
+        from ticker_list import ticker_list
+        print(f"{len(ticker_list)} Stock Tickers imported")
+        return ticker_list
+    except ImportError:
+        return []
 
 
-pages = [n for n in range(1, 26)]
+#pages = list(range(1, 26))
 
 # for condition_8, RS rating should be greater than 70
 # The RS Rating tracks a stock's share price performance over the last 52 weeks,
 # and then compares the result to that of all other stocks.
-performance_table = Screener(filter_options=[Screener.IndexOption.S_AND_P_500], view_option=Screener.ViewOption.PERFORMANCE, order_by=Screener.OrderBy.PERFORMANCE_YEAR, pages=pages )
-
-rs_list = []
-for p in pages:
-    rs_table = performance_table.data_frames.get(p)
-    rs_list += rs_table['Ticker'].to_list()
-print(f"{len(rs_list)} RS Tickers")
+#performance_table = Screener(filter_options=[Screener.IndexOption.S_AND_P_500], view_option=Screener.ViewOption.PERFORMANCE, order_by=Screener.OrderBy.PERFORMANCE_YEAR, pages=pages )
 
 
-# for condition_9 of trend_template_screener, it has to compare with S&P500 index
-df_spx = clean_stock_data(yf.download(tickers='^GSPC', period='2y', auto_adjust=True))
+def get_rs_ticker_list():
+    """"""
+    rs_list = []
+    for p in range(1,30):
+        try:
+            performance_table = Screener(filter_options=[Screener.IndexOption.S_AND_P_500],
+                                         view_option=Screener.ViewOption.PERFORMANCE,
+                                         order_by=Screener.OrderBy.PERFORMANCE_YEAR, pages=[p] )
+            rs_table = performance_table.data_frames.get(p)
+            rs_list += rs_table['Ticker'].to_list()
+        except ValueError:
+            break
+
+    print(f"{len(rs_list)} RS Tickers")
+
+    return rs_list
 
 
-# In[ ]:
+def minervini_method(ticker_list, rs_list):
+    """"""
+
+    # for condition_9 of trend_template_screener, it has to compare with S&P500 index
+    df_spx = clean_stock_data(yf.download(tickers='^GSPC', period='2y', auto_adjust=True))
+
+    # ticker.info is not used because processing time is too long
 
 
-# ticker.info is not used because processing time is too long
+    # Create a dataframe to store results later
+    radar = pd.DataFrame({
+        'Ticker': [],
+        'Num_of_contraction': [],
+        'Max_contraction': [],
+        'Min_contraction': [],
+        'Weeks_of_contraction': [],
+        'RS_rating': []
+    })
 
+    failures = 0
 
-# Create a dataframe to store results later
-radar = pd.DataFrame({
-    'Ticker': [],
-    'Num_of_contraction': [],
-    'Max_contraction': [],
-    'Min_contraction': [],
-    'Weeks_of_contraction': [],
-    'RS_rating': []
-})
-
-fail = 0
-
-today=dt.today()
-minus_1y=today.replace(year=today.year-1)
-
-for ticker_string in ticker_list:
-    try:
-        ticker_history = clean_stock_data(yf.download(tickers=ticker_string, period='2y', auto_adjust=True))
-        trend_template_screener = trend_template(ticker_history) # Determine whether the stocks is in Stage 2
-        if trend_template_screener['Pass'].iloc[-1] == 1:
-            print(f'{ticker_string} is in Stage 2')
-            vcp_screener = list(vcp(ticker_history)) # Determine whether the stocks is in Stage 2
-            rs = rs_rating(ticker_string,rs_list) # Calculate RS rating
-            if (vcp_screener[-1] == 1) & (rs >= 70):
-                vcp_screener.insert(0,ticker_string)
-                vcp_screener.insert(-1,rs)
-                radar.loc[len(radar)] = vcp_screener[0:6] # Store the results to the dataframe
-                print(f'{ticker_string} has a VCP - rs = {rs}')
+    for ticker_string in ticker_list:
+        try:
+            ticker_history = clean_stock_data(yf.download(tickers=ticker_string, period='2y', auto_adjust=True))
+            trend_template_screener = trend_template(ticker_history) # Determine whether the stocks is in Stage 2
+            if trend_template_screener['Pass'].iloc[-1] == 1:
+                print(f'{ticker_string} is in Stage 2')
+                vcp_screener = list(vcp(ticker_history)) # Determine whether the stocks is in Stage 2
+                rs = rs_rating(ticker_string,rs_list) # Calculate RS rating
+                if (vcp_screener[-1] == 1) & (rs >= 70):
+                    vcp_screener.insert(0,ticker_string)
+                    vcp_screener.insert(-1,rs)
+                    radar.loc[len(radar)] = vcp_screener[0:6] # Store the results to the dataframe
+                    print(f'{ticker_string} has a VCP - rs = {rs}')
+                else:
+                    print(f'{ticker_string} does not have a VCP')
             else:
-                print(f'{ticker_string} does not have a VCP')
-        else:
-            print(f'{ticker_string} is not in Stage 2')
-    except:
-        fail+=1
+                print(f'{ticker_string} is not in Stage 2')
+        except:
+            failures+=1
 
-print('Finished!!!')
-print(f'{fail} stocks fail to analyze')
+    print('Finished!!!')
+    print(f'{failures} stocks fail to analyze')
 
 
-# In[ ]:
+    # In[ ]:
 
 
-print(f'{len(radar)} stocks pass')
-# print(radar)
+    print(f'{len(radar)} stocks pass')
+    # print(radar)
 
 
-# In[ ]:
+    # In[ ]:
+    outdir = datetime.now().isoformat(' ').split(' ')[0]
+    os.makedirs(outdir, exist_ok=True)
+
+    for ticker in radar['Ticker']:
+        ticker_history = clean_stock_data(yf.download(tickers=ticker, period='2y', auto_adjust=True))
+        [local_high, local_low] = local_high_low(ticker_history)
+        contraction = contractions(ticker_history,local_high,local_low)
+        num_of_contraction = num_of_contractions(contraction)
+        local_high = local_high[::-1][0:num_of_contraction]
+        local_low = local_low[::-1][0:num_of_contraction]
+
+        plt.plot(range(len(ticker_history.index)),ticker_history['Close'])
+        plt.plot(local_high,ticker_history['High'].iloc[local_high],'o')
+        plt.plot(local_low,ticker_history['Low'].iloc[local_low],'x')
+
+        plt.title(ticker)
+        plt.xlabel('Days')
+        plt.ylabel('Close Price')
+        #plt.show()
+        print(f"Plot {ticker} figure")
+        plt.savefig(f"{outdir}/{ticker}.png")
+        plt.clf()
 
 
-for ticker in radar['Ticker']:
-    ticker_history = clean_stock_data(yf.download(tickers=ticker, period='2y', auto_adjust=True))
-    [local_high, local_low] = local_high_low(ticker_history)
-    contraction = contractions(ticker_history,local_high,local_low)
-    num_of_contraction = num_of_contractions(contraction)
-    local_high = local_high[::-1][0:num_of_contraction]
-    local_low = local_low[::-1][0:num_of_contraction]
-
-    plt.plot(range(len(ticker_history.index)),ticker_history['Close'])
-    plt.plot(local_high,ticker_history['High'].iloc[local_high],'o')
-    plt.plot(local_low,ticker_history['Low'].iloc[local_low],'x')
-
-    plt.title(ticker)
-    plt.xlabel('Days')
-    plt.ylabel('Close Price')
-    plt.show()
+    # In[ ]:
 
 
-# In[ ]:
+    # Define the filename for your Excel file
+    # filename = 'C:/Users/marco/Desktop/Trade Resources/Watchlist/vcp_screener.xlsx'
+    filename = './vcp_screener.xlsx'
+
+    # Get today's date
+    sheetname = dt.today().strftime("%Y_%m_%d")
+
+    # Try to read in the existing file (if it exists)
+    try:
+        database = pd.read_excel(filename, sheet_name=None)
+    except FileNotFoundError:
+        database = {}
+
+    # Add today's data to the existing data (if any)
+    database[sheetname] = radar
+
+    print("Writing results to new sheet of spreadsheet.")
+    # Write the updated data to the Excel file
+    with pd.ExcelWriter(filename) as writer:
+        for sheet_name, df in database.items():
+            df.to_excel(writer, sheet_name=sheet_name, index=False)
 
 
-# Define the filename for your Excel file
-# filename = 'C:/Users/marco/Desktop/Trade Resources/Watchlist/vcp_screener.xlsx'
-filename = './vcp_screener.xlsx'
+def parse_opts():
+    """"""
+    parser = argparse.ArgumentParser(description="")
+    parser.add_argument('-t', dest='newtickers', action='store_true', default=False, help="refresh the ticker list")
+    parser.add_argument('-m', dest='minervini', action='store_true', default=False, help="use minervini vcp method")
+    parser.add_argument('-g', dest='gain15', action='store_true', default=False, help="use 15% gain method")
+    parser.add_argument('-p', dest='percent', type=int, default=15, help="gain percentage")
+    return parser.parse_args()
 
-# Get today's date
-today = dt.today().strftime("%Y_%m_%d")
 
-# Try to read in the existing file (if it exists)
-try:
-    database = pd.read_excel(filename, sheet_name=None)
-except FileNotFoundError:
-    database = {}
+if __name__ == '__main__':
 
-# Add today's data to the existing data (if any)
-database[today] = radar
+    args = parse_opts()
+    print(f"{args}")
+    #sys.exit()
 
-# Write the updated data to the Excel file
-with pd.ExcelWriter(filename) as writer:
-    for sheet_name, df in database.items():
-        df.to_excel(writer, sheet_name=sheet_name, index=False)
+    if not args.newtickers:
+        ticker_list = get_saved_ticker_list()
 
+    if ticker_list == [] or args.newtickers:
+        ticker_list = get_screened_tickers()
+
+    if args.minervini:
+        minervini_method(ticker_list, get_rs_ticker_list())
+
+    if args.gain15:
+        stocks = get_stocks_with_15_percent_gain(ticker_list, args.percent)
+        print(f"Stocks with >{args.percent}% gain in any 2-week period:\n")
+        for t in stocks:
+            for gain in stocks[t]:
+                print(f"{gain[1]}")
+            print("")
