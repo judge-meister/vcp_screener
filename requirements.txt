@@ -1,0 +1,5 @@
+matplotlib
+openpyxl
+pyfinviz
+scipy
+yfinance
